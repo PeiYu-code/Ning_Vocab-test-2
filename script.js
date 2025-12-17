@@ -1,17 +1,18 @@
-// script.js - PDF export version (FIXED)
+// script.js - fully fixed PDF export version
 let allWords = [];
 let selectedWords = [];
-let resultsForDownload = [];
+let resultsForDownload = []; // { word, studentAns, correctChinese }
 
-// Load words
+// Load words from JSON
 async function loadWords() {
   const response = await fetch("word_bank.json");
   if (!response.ok) throw new Error("Failed to load word_bank.json");
   const data = await response.json();
+  if (!Array.isArray(data.words)) throw new Error("Invalid word_bank.json format");
   allWords = data.words;
 }
 
-// Pick up to 25 words
+// Pick up to 25 random words
 function pickRandom25(words) {
   const shuffled = [...words].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, Math.min(25, shuffled.length));
@@ -19,7 +20,14 @@ function pickRandom25(words) {
 
 // Start test
 document.getElementById("startBtn").addEventListener("click", async () => {
-  await loadWords();
+  try {
+    await loadWords();
+  } catch (err) {
+    alert("Failed to load word bank. Check filenames.");
+    console.error(err);
+    return;
+  }
+
   selectedWords = pickRandom25(allWords);
   resultsForDownload = [];
 
@@ -53,28 +61,25 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
     const word = selectedWords[i].word;
     const studentAns = document.getElementById(`answer-${i}`).value.trim();
 
-    let correctChinese = "（翻譯失敗）";
+    let correctChinese = "（翻譯失敗）"; // default if fetch fails
 
     try {
-      const url =
-        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=" +
-        encodeURIComponent(word);
-
+      const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=" + encodeURIComponent(word);
       const resp = await fetch(url);
-      const data = await resp.json();
-
-      if (
-        Array.isArray(data) &&
-        data[0] &&
-        data[0][0] &&
-        data[0][0][0]
-      ) {
-        correctChinese = data[0][0][0];
+      if (resp.ok) {
+        const data = await resp.json();
+        // Safe explicit check for nested array
+        if (Array.isArray(data) && data[0] && data[0][0] && data[0][0][0]) {
+          correctChinese = data[0][0][0];
+        } else {
+          correctChinese = "（無結果）";
+        }
       } else {
-        correctChinese = "（無結果）";
+        correctChinese = "（翻譯失敗）";
       }
     } catch (e) {
-      console.error("Translation error:", word, e);
+      console.error("Translation error for", word, e);
+      correctChinese = "（翻譯失敗）";
     }
 
     resultsForDownload.push({
@@ -98,8 +103,13 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
   document.getElementById("downloadBtn").classList.remove("hidden");
 });
 
-// Download PDF
+// Download results as PDF
 document.getElementById("downloadBtn").addEventListener("click", () => {
+  if (!resultsForDownload.length) {
+    alert("No results to download. Please run a test first.");
+    return;
+  }
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
 
@@ -113,10 +123,11 @@ document.getElementById("downloadBtn").addEventListener("click", () => {
   y += 10;
 
   resultsForDownload.forEach((r, i) => {
-    if (y > 280) {
+    if (y > 280) { // add new page if near bottom
       doc.addPage();
       y = 15;
     }
+
     doc.text(`${i + 1}. ${r.word}`, 10, y);
     y += 6;
     doc.text(`Your answer: ${r.studentAns}`, 12, y);
