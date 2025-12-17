@@ -1,18 +1,16 @@
-// script.js - fully fixed for web display + readable PDF
+// script.js - PRINT-TO-PDF version (Chinese safe)
 let allWords = [];
 let selectedWords = [];
-let resultsForDownload = []; // { word, studentAns, correctChinese }
+let resultsForDownload = [];
 
 // Load words
 async function loadWords() {
   const response = await fetch("word_bank.json");
-  if (!response.ok) throw new Error("Failed to load word_bank.json");
   const data = await response.json();
-  if (!Array.isArray(data.words)) throw new Error("Invalid word_bank.json format");
   allWords = data.words;
 }
 
-// Pick up to 25 words randomly
+// Pick up to 25 words
 function pickRandom25(words) {
   const shuffled = [...words].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, Math.min(25, shuffled.length));
@@ -20,14 +18,7 @@ function pickRandom25(words) {
 
 // Start test
 document.getElementById("startBtn").addEventListener("click", async () => {
-  try {
-    await loadWords();
-  } catch (err) {
-    alert("Failed to load word bank. Check filenames.");
-    console.error(err);
-    return;
-  }
-
+  await loadWords();
   selectedWords = pickRandom25(allWords);
   resultsForDownload = [];
 
@@ -51,7 +42,7 @@ document.getElementById("startBtn").addEventListener("click", async () => {
   document.getElementById("resultTitle").classList.add("hidden");
 });
 
-// Show correct answers and store results
+// Show correct answers
 document.getElementById("submitBtn").addEventListener("click", async () => {
   const resultsDiv = document.getElementById("results");
   resultsDiv.innerHTML = "";
@@ -64,29 +55,22 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
     let correctChinese = "（翻譯失敗）";
 
     try {
-      const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=" + encodeURIComponent(word);
+      const url =
+        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=" +
+        encodeURIComponent(word);
       const resp = await fetch(url);
-      if (resp.ok) {
-        const data = await resp.json();
-        if (Array.isArray(data) && data[0] && data[0][0] && data[0][0][0]) {
-          correctChinese = data[0][0][0];
-        } else {
-          correctChinese = "（無結果）";
-        }
+      const data = await resp.json();
+      if (data && data[0] && data[0][0] && data[0][0][0]) {
+        correctChinese = data[0][0][0];
       }
-    } catch (e) {
-      console.error("Translation error for", word, e);
-      correctChinese = "（翻譯失敗）";
-    }
+    } catch (e) {}
 
-    // Store results for PDF download
     resultsForDownload.push({
       word,
       studentAns: studentAns || "（空白）",
       correctChinese
     });
 
-    // Display on webpage
     const row = document.createElement("div");
     row.innerHTML = `
       <p>
@@ -102,38 +86,46 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
   document.getElementById("downloadBtn").classList.remove("hidden");
 });
 
-// Download results as PDF (readable default font)
+// Download PDF via browser print (Chinese-safe)
 document.getElementById("downloadBtn").addEventListener("click", () => {
-  if (!resultsForDownload.length) {
-    alert("No results to download. Please run a test first.");
-    return;
-  }
+  const win = window.open("", "_blank");
 
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-
-  let y = 40;
-  doc.setFont("helvetica", "normal"); // safe default font
-  doc.setFontSize(16);
-  doc.text("Vocabulary Test Results", 40, y);
-  y += 25;
-
-  doc.setFontSize(12);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, 40, y);
-  y += 20;
+  let html = `
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Vocabulary Test Results</title>
+      <style>
+        body { font-family: serif; padding: 30px; }
+        h1 { text-align: center; }
+        p { margin: 12px 0; }
+        hr { border: none; border-top: 1px solid #ccc; }
+      </style>
+    </head>
+    <body>
+      <h1>Vocabulary Test Results</h1>
+      <p>Generated: ${new Date().toLocaleString()}</p>
+      <hr>
+  `;
 
   resultsForDownload.forEach((r, i) => {
-    if (y > 770) { // new page if bottom reached
-      doc.addPage();
-      y = 40;
-    }
-    doc.text(`${i + 1}. ${r.word}`, 40, y);
-    y += 16;
-    doc.text(`Your answer: ${r.studentAns}`, 60, y);
-    y += 16;
-    doc.text(`Reference: ${r.correctChinese}`, 60, y);
-    y += 20;
+    html += `
+      <p>
+        <b>${i + 1}. ${r.word}</b><br>
+        你的答案：${r.studentAns}<br>
+        參考中文：${r.correctChinese}
+      </p>
+      <hr>
+    `;
   });
 
-  doc.save("vocab_results.pdf");
+  html += `
+    </body>
+    </html>
+  `;
+
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  win.print();
 });
